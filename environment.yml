@@ -1,0 +1,11 @@
+name: cs224r_project
+channels:
+  - pytorch
+  - defaults
+  - conda-forge
+dependencies:
+  - pip=20.3.1
+  - python=3.7
+  - numpy
+  - tqdm
+  - pandas
