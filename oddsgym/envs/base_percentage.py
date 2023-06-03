@@ -43,11 +43,12 @@ class BasePercentageOddsEnv(BaseOddsEnv):
 
     """
 
-    def __init__(self, odds, odds_column_names, results=None, *args, **kwargs):
-        super().__init__(odds, odds_column_names, results, *args, **kwargs)
+    def __init__(self, main_df, odds_column_names, num_possible_outcomes=3, results=None, *args, **kwargs):
+        super().__init__(main_df, odds_column_names, num_possible_outcomes, results, *args, **kwargs)
         self.bet_size_matrix = None
-        self.action_space = spaces.Box(low=numpy.array([-1] * odds.shape[1]),
-                                       high=numpy.array([1.] * odds.shape[1]))
+        ACTION_DIM = int(num_possible_outcomes)
+        self.action_space = spaces.Box(low=numpy.array([-1] * ACTION_DIM),
+                                       high=numpy.array([1.] * ACTION_DIM))
 
     def step(self, action):
         form_binary_repr = numpy.where(action != 0, 1, 0)
