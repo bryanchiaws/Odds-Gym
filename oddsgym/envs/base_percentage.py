@@ -43,11 +43,12 @@ class BasePercentageOddsEnv(BaseOddsEnv):
 
     """
 
-    def __init__(self, main_df, odds_column_names, num_possible_outcomes=3, results=None, *args, **kwargs):
-        super().__init__(main_df, odds_column_names, num_possible_outcomes, results, *args, **kwargs)
-        ACTION_DIM = int(num_possible_outcomes)
-        self.action_space = spaces.Box(low=np.array([0.0] * ACTION_DIM),
-                                       high=np.array([1.0] * ACTION_DIM))
+    def __init__(self, main_df, odds_column_names, num_possible_outcomes=3, results=None, starting_bank=1000, constraining=0.1, *args, **kwargs):
+        super().__init__(main_df, odds_column_names, num_possible_outcomes, results, starting_bank, *args, **kwargs)
+        assert 0.0 < constraining <= 1.0, f'constraining factor must be a floating argument in (0.0, 1.0]'
+        self.constraining = constraining
+        self.action_space = spaces.Box(low=np.array([0.0] * self.ACTION_DIM),
+                                       high=np.array([self.constraining * 1.0] * self.ACTION_DIM))
 
     # @override
     def step(self, action):
@@ -81,11 +82,11 @@ class BasePercentageOddsEnv(BaseOddsEnv):
     
     # @override
     def finish(self):
-        return self.current_step == self._df.shape[0] or self.balance < 0
+        return self.current_step == self._df.shape[0] or self.balance <= 0
     
     # @override
     def legal_bet(self, bets):
-        return np.sum(bets) <= self.balance and np.all(bets >= 0)
+        return np.sum(bets) <= (self.constraining * self.balance) and np.all(bets >= 0)
     
     # @override
     def get_bet(self, action):
