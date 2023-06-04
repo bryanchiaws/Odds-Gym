@@ -1,4 +1,4 @@
-import numpy
+import numpy as np
 from gym import spaces
 from .base import BaseOddsEnv
 
@@ -45,13 +45,74 @@ class BasePercentageOddsEnv(BaseOddsEnv):
 
     def __init__(self, main_df, odds_column_names, num_possible_outcomes=3, results=None, *args, **kwargs):
         super().__init__(main_df, odds_column_names, num_possible_outcomes, results, *args, **kwargs)
-        self.bet_size_matrix = None
         ACTION_DIM = int(num_possible_outcomes)
-        self.action_space = spaces.Box(low=numpy.array([-1] * ACTION_DIM),
-                                       high=numpy.array([1.] * ACTION_DIM))
+        self.action_space = spaces.Box(low=np.array([0.0] * ACTION_DIM),
+                                       high=np.array([1.0] * ACTION_DIM))
 
+    # @override
     def step(self, action):
-        form_binary_repr = numpy.where(action != 0, 1, 0)
-        form = form_binary_repr.dot(1 << numpy.arange(form_binary_repr.size)[::-1])
-        self.bet_size_matrix = self._rescale_matrix(action) * self.balance
-        return super().step(form)
+        """ action is the fraction of balance to bet on each outcome i.e. np.array([0.0813, 0.0176, 0.255])"""
+        odds = self.get_odds()
+        reward = 0
+        done = False
+        info = self.create_info(action)
+        if self.balance < 0:  # no more money :-(
+            done = True
+        else:
+            bets = self.get_bet(action)
+            results = self.get_results()
+            if self.legal_bet(bets):  # making sure agent has enough money for the bet
+                bets, odds, results = bets.reshape((-1, self.ACTION_DIM)), odds.reshape((-1, self.ACTION_DIM)), results.reshape((-1, self.ACTION_DIM))
+                reward = self.get_reward(bets, odds, results)
+                self.balance += reward
+                info.update(legal_bet=True)
+            else:
+                reward = -1 * np.sum(bets)
+            info.update(results=results.argmax())
+            info.update(reward=reward)
+            self.current_step += 1
+            if self.finish():
+                done = True
+                next = np.ones(shape=self.observation_space.shape)
+            else:
+                next = self.get_obs()
+        info.update(done=done)
+        return next, reward, done, info
+    
+    # @override
+    def finish(self):
+        return self.current_step == self._df.shape[0] or self.balance < 0
+    
+    # @override
+    def legal_bet(self, bets):
+        return np.sum(bets) <= self.balance and np.all(bets >= 0)
+    
+    # @override
+    def get_bet(self, action):
+        return np.round(action * self.balance, 2)
+    
+    # @override
+    def get_reward(self, bets, odds, results):
+        """ Calculates the reward
+
+        Parameters
+        ----------
+        bet : array of shape (1, n_odds) -- how much (dollars) the agent is betting on each outcome
+        odds: dataframe of shape (1, n_odds)
+            A games with its betting odds.
+        results : array of shape (1, n_odds)
+
+        Returns
+        -------
+        reward : float
+            The amount of reward returned after previous action
+        """
+        returns = np.sum(bets * odds * results)
+        expenses = np.sum(bets)
+        profit = returns - expenses      
+        return profit
+    
+    # @override
+    def create_info(self, action):
+        return {'current_step': self.current_step, 'odds': self.get_odds(), 'bets': f'home: {action[0]} | draw: {action[1]} | away: {action[2]}',
+                'results': None, 'reward': 0, 'balance': self.balance, 'legal_bet': False, 'done': False}
