@@ -1,6 +1,17 @@
+# needs a Python 3.7 installation for consistency with Tensorflow!
+# installing gym 0.19.0 may require you to update (or uninstall -> install) setuptools
+
+numpy
+pandas
+matplotlib
 tensorflow==1.15.0
 gymnasium
 stable_baselines
 ipykernel
 protobuf==3.20.*
 gym==0.19.0
+numexpr
+infi
+infi.traceback
+tqdm
+tabulate

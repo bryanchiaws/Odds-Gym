@@ -56,33 +56,39 @@ class BaseOddsEnv(gym.Env):
     metadata = {'render.modes': ['human']}
     HEADERS = ['Current Step', 'Odds', 'Verbose Action', 'Action', 'Balance', 'Reward', 'Results', 'Done']
 
-    def __init__(self, odds, odds_column_names, results=None, starting_bank=10):
+    def __init__(self, main_df, odds_column_names, num_possible_outcomes=3, results=None, starting_bank=1000):
         """Initializes a new environment
 
         Parameters
         ----------
-        odds: dataframe of shape (n_games, n_odds)
-            A list of games, with their betting odds.
+        main_df: dataframe of shape (n_games, feats_dim)
+            A list of games, with their the features the agent can access in training (including odds + additional info).
         odds_column_names: list of str
             A list of column names with length == n_odds.
+        num_possible_outcomes: int
+            Number of possible outcomes for a single game. i.e. 3 for soccer (home/draw/away), 2 for tennis / basketball (just home/away)
+            Corresponds to the number of odds & bets to be (potentially) placed by the agent for each single match
         results: list of int, default=None
             A list of the results, where results[i] is the outcome of odds[i].
         """
 
         super().__init__()
-        self._odds = odds.copy()
+        self._df = main_df.copy()
+        self._odds_values_df = main_df.copy()[odds_column_names]
+        self.ACTION_DIM = int(num_possible_outcomes)
+        self.OBS_DIM = self._df.shape[1] # number of features the agent can access for each game (which includes odds + additional features)
         self._results = results
         self._odds_columns_names = odds_column_names
         self._verbose_actions = ActionsDict(self._odds_columns_names)
-        self.observation_space = gym.spaces.Box(low=1., high=float('Inf'),
-                                                shape=(1, odds.shape[1]), dtype=numpy.float64)
-        self.action_space = gym.spaces.Discrete(2 ** odds.shape[1])
-        self.balance = self.starting_bank = starting_bank
+        self.observation_space = gym.spaces.Box(low=0.0, high=100.0, shape=(1, self.OBS_DIM), dtype=numpy.float64)
+        self.action_space = gym.spaces.Discrete(2 ** self.ACTION_DIM)
+        self.balance = starting_bank
+        self.starting_bank = starting_bank
         self.current_step = 0
-        self.bet_size_matrix = numpy.ones(shape=self.observation_space.shape)
+        self.bet_size_matrix = numpy.ones(shape=(self._df.shape[0], self.ACTION_DIM))
 
     def _get_current_index(self):
-        return self.current_step % self._odds.shape[0]
+        return self.current_step % self._df.shape[0]
 
     def get_odds(self):
         """Returns the odds for the current step.
@@ -92,7 +98,11 @@ class BaseOddsEnv(gym.Env):
         odds : numpy.ndarray of shape (1, n_odds)
             The odds for the current step.
         """
-        return DataFrame([self._odds[self.current_step]]).values
+        return self._odds_values_df.iloc[self.current_step].values
+    
+    def get_obs(self):
+        """Returns the feature-space observation for the current_step"""
+        return self._df.iloc[self.current_step].values
 
     def get_bet(self, action):
         """Returns the betting matrix for the action provided.
@@ -108,7 +118,7 @@ class BaseOddsEnv(gym.Env):
             The betting matrix, where each outcome specified in the action
             has a value of 1 and 0 otherwise.
         """
-        return numpy.array([[bit for bit in numpy.binary_repr(action, width=self._odds.shape[1])]]).astype(int)
+        return numpy.array([[bit for bit in numpy.binary_repr(action, width=self.ACTION_DIM)]]).astype(int)
 
     @pretty_traceback_and_exit_decorator
     def step(self, action):
@@ -124,7 +134,7 @@ class BaseOddsEnv(gym.Env):
 
         Returns
         -------
-        observation : dataframe of shape (1, n_odds)
+        observation : dataframe of shape (1, OBS_DIM)
             The agent's observation of the current environment
         reward : float
             The amount of reward returned after previous action
@@ -144,6 +154,7 @@ class BaseOddsEnv(gym.Env):
             bet = self.get_bet(action)
             results = self.get_results()
             if self.legal_bet(bet):  # making sure agent has enough money for the bet
+                bet, odds, results = bet.reshape((-1, self.ACTION_DIM)), odds.reshape((-1, self.ACTION_DIM)), results.reshape((-1, self.ACTION_DIM))
                 reward = self.get_reward(bet, odds, results)
                 self.balance += reward
                 info.update(legal_bet=True)
@@ -154,11 +165,11 @@ class BaseOddsEnv(gym.Env):
             self.current_step += 1
             if self.finish():
                 done = True
-                odds = numpy.ones(shape=self.observation_space.shape)
+                next = numpy.ones(shape=self.observation_space.shape)
             else:
-                odds = self.get_odds()
+                next = self.get_obs()
         info.update(done=done)
-        return odds, reward, done, info
+        return next, reward, done, info
 
     def get_reward(self, bet, odds, results):
         """ Calculates the reward
@@ -176,9 +187,10 @@ class BaseOddsEnv(gym.Env):
             The amount of reward returned after previous action
         """
         bet_size_matrix = self.bet_size_matrix  # noqa: F841
-        reward = numexpr.evaluate('sum(bet * bet_size_matrix * results * odds)')
-        expense = numexpr.evaluate('sum(bet * bet_size_matrix)')
-        return reward - expense
+        returns = numexpr.evaluate('sum(bet * bet_size_matrix * results * odds)')
+        expenses = numexpr.evaluate('sum(bet * bet_size_matrix)')
+        profit = returns - expenses
+        return profit
 
     def reset(self):
         """Resets the state of the environment and returns an initial observation.
@@ -190,7 +202,8 @@ class BaseOddsEnv(gym.Env):
         """
         self.balance = self.starting_bank
         self.current_step = 0
-        return self.get_odds()
+        return self._df.iloc[0].values
+    
 
     def render(self, mode='human'):
         """Outputs the current balance and the current step.
@@ -212,7 +225,7 @@ class BaseOddsEnv(gym.Env):
         finish : bool
             True if the current_step is equal to n_games, False otherwise
         """
-        return self.current_step == self._odds.shape[0]  # no more games left to bet
+        return self.current_step == self._df.shape[0]  # no more games left to bet
 
     def get_results(self):
         """Returns the results matrix for the current step.
@@ -223,9 +236,11 @@ class BaseOddsEnv(gym.Env):
             The result matrix, where the index of the outcome that happened
             value is 1 and the rest of the indexes values are 0.
         """
-        result = numpy.zeros(shape=self.observation_space.shape)
-        result[numpy.arange(result.shape[0], dtype=numpy.int32),
-               numpy.array([self._results[self.current_step]], dtype=numpy.int32)] = 1
+        result = numpy.zeros(self.ACTION_DIM)
+        label_index = self._results[self.current_step]
+        result[label_index] = 1
+        # result[numpy.arange(result.shape[0], dtype=numpy.int32),
+        #        numpy.array([self._results[self.current_step]], dtype=numpy.int32)] = 1
         return result
 
     def legal_bet(self, bet):
@@ -266,7 +281,7 @@ class BaseOddsEnv(gym.Env):
             The info dictionary.
         """
         return {'current_step': self.current_step, 'odds': self.get_odds(), 'verbose_action': self._verbose_actions[action],
-                'action': action, 'balance': self.balance, 'reward': 0,
+                'action': str(action), 'balance': self.balance, 'reward': 0,
                 'legal_bet': False, 'results': None, 'done': False}
 
     def pretty_print_info(self, info):
@@ -276,7 +291,7 @@ class BaseOddsEnv(gym.Env):
     def _rescale_form(self, form):
         if form == 1:
             form -= numpy.finfo(numpy.float64).eps
-        return numpy.floor((form + 1) * (2 ** (self._odds.shape[1] - 1))).astype(int)
+        return numpy.floor((form + 1) * (2 ** (self.ACTION_DIM - 1))).astype(int)
 
     def _rescale_matrix(self, bet_size_matrix):
         return numpy.abs(bet_size_matrix)

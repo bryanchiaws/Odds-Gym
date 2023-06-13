@@ -5,7 +5,7 @@ from .meta import MetaEnvBuilder
 class ThreeWaySoccerOddsEnv(metaclass=MetaEnvBuilder):
     sport = '3-way soccer'
     versionadded = '0.1.0'
-    odds_column_names = ['home', 'draw', 'away']
+    odds_column_names = ['odds_home', 'odds_draw', 'odds_away']
 
     def __init__(self, soccer_bets_dataframe, *args, **kwargs):
         """Initializes a new environment.
@@ -28,6 +28,7 @@ class ThreeWaySoccerOddsEnv(metaclass=MetaEnvBuilder):
             results = results.values
         self.teams = soccer_bets_dataframe[['home_team', 'away_team']]
         super().__init__(odds, self.odds_column_names, results, *args, **kwargs)
+        self._seed = 0
 
     def render(self, mode='human'):
         """Outputs the current team names, balance and step.
@@ -45,6 +46,9 @@ class ThreeWaySoccerOddsEnv(metaclass=MetaEnvBuilder):
         teams_str = teams_str + "."
         print(teams_str)
         super().render(mode)
+
+    def seed(self, new_seed):
+        self._seed = new_seed
 
 
 class ThreeWaySoccerPercentageOddsEnv(ThreeWaySoccerOddsEnv):
